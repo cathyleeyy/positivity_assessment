@@ -1,3 +1,7 @@
+# This script is a mordified version of the R script provided in Kang et al.
+# (2016). This conducts simulation studies to assess the effect of arbitrary
+# cutoffs of propensity scores.
+
 # Load required libraries.
 suppressMessages(library(survey))
 suppressMessages(library(gbm))
@@ -340,9 +344,3 @@ for (i in 1:N.SIMULATIONS) {
     bias.rmse = round(apply(bias[[i]], 2, function(col) sqrt(mean(col ^ 2))), 2)
   )
 }
-
-
-
-
-
-
