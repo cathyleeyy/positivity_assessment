@@ -18,8 +18,8 @@ is.runIPW <- FALSE
 
 # Set up dimension effect.
 N.OBS <- 1000
-N.COVARIATES <- c(4) # c(4, 4, 40, 40)
-N.NPOSITIVITY <- c(2) # c(1, 1, 2, 2)
+N.COVARIATES <- c(4, 4, 40, 40)
+N.NPOSITIVITY <- c(1, 1, 2, 2)
 N.SIMULATIONS <- length(N.COVARIATES)
 N.SAMPLES <- 200
 N.VALIDS <- 40 # Number of cross-validations for JCART.
