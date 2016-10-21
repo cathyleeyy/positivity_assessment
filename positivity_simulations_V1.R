@@ -1,4 +1,4 @@
-# This script is a mordified version of the R script provided in Kang et al.
+# This script is a modified version of the R script provided in Kang et al.
 # (2016). This conducts simulation studies to assess the effect of arbitrary
 # cutoffs of propensity scores.
 
