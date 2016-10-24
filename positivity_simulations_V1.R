@@ -12,9 +12,9 @@ suppressMessages(library(rpart))
 suppressMessages(library(survey))
 suppressMessages(library(tree))
 
-is.runJCART <- TRUE
-is.runMatching <- TRUE
-is.runIPW <- FALSE
+is.runJCART <- TRUE # Run JCART.
+is.runMatching <- TRUE # Run matching.
+is.runIPW <- TRUE # Run inverse probability reweighting.
 
 # Set up dimension effect.
 N.OBS <- 1000
@@ -358,6 +358,15 @@ for (s in 1:N.SIMULATIONS) {
         bias.estimate <- coef(sglm.rf)[2]- effect
         return(bias.estimate)
       }
+
+      bias[[s]][b, "IPW.rf"] <-
+        PropensityViaIPWrf(low.cut = -99, high.cut = 99)
+      bias[[s]][b, "IPW.rf_0.025"] <-
+        PropensityViaIPWrf(low.cut = 0.025, high.cut = 0.975)
+      bias[[s]][b, "IPW.rf_0.05"] <-
+        PropensityViaIPWrf(low.cut = 0.05, high.cut = 0.95)
+      bias[[s]][b, "IPW.rf_0.1"] <-
+        PropensityViaIPWrf(low.cut = 0.1, high.cut = 0.9)
     }
   }
 }
