@@ -3,7 +3,6 @@
 # cutoffs of propensity scores.
 
 # Load required libraries.
-suppressMessages(library(cem))
 suppressMessages(library(gbm))
 suppressMessages(library(MatchIt))
 suppressMessages(library(MASS))
@@ -16,7 +15,7 @@ is.runJCART <- TRUE # Run JCART.
 is.runMatching <- TRUE # Run matching.
 is.runIPW <- TRUE # Run inverse probability reweighting.
 
-# Set up dimension effect.
+# Set up dimensional parameters.
 N.OBS <- 1000
 N.COVARIATES <- c(4, 4, 40, 40)
 N.NPOSITIVITY <- c(1, 1, 2, 2)
@@ -29,6 +28,11 @@ N.CUTS <- 4 # Number of propensity score trimming rules for JCART.
 # Set up response-exposure formula.
 outcome.formula <- "Y.observed ~ exposure"
 
+# Define general functions.
+expit <- function(a) {
+  exp(a) / (1 + exp(a))
+}
+
 # Set up exposure-confounder formula.
 ComputeExposureFormula <- function(n.covariates) {
   exposure.formula <- as.formula(
@@ -38,9 +42,9 @@ ComputeExposureFormula <- function(n.covariates) {
   )
 }
 
-# Define general functions.
-expit <- function(a) {
-  exp(a) / (1 + exp(a))
+CreateSurveyDesign <- function(weights, data, subset.rule) {
+  subset(svydesign(id = ~ 1, weights = ~ weights, data = data),
+         subset.rule)
 }
 
 ComputePropensityWeights <- function(exposure, p.scores) {
@@ -48,11 +52,6 @@ ComputePropensityWeights <- function(exposure, p.scores) {
   second.term <- (1 - exposure) * mean(1 - exposure) / (1 - p.scores)
   weights <- first.term + second.term
   return(weights)
-}
-
-CreateSurveyDesign <- function(weights, data, subset.rule) {
-  subset(svydesign(id = ~ 1, weights = ~ weights, data = data),
-         subset.rule)
 }
 
 GenerateData <- function(n.obs, n.covariates, n.npositivity) {
@@ -86,7 +85,7 @@ GenerateData <- function(n.obs, n.covariates, n.npositivity) {
   true.p.scores <- rep(NA, n.obs)
   true.p.scores[idx.p] <- exp(eta) / (1 + exp(eta))
 
-  # Set propensity scores to 0 or 1 for those non-positivity subjects.
+  # Set propensity scores to be 0 or 1 for those non-positivity subjects.
   true.p.scores[idx.np.low] <- 0
   true.p.scores[idx.np.upp] <- 1
 
@@ -113,7 +112,7 @@ GenerateData <- function(n.obs, n.covariates, n.npositivity) {
   Y1[idx.p] <-  rbinom(n = sum(idx.p), size = 1, prob = 0.6)
   Y0[idx.p] <-  rbinom(n = sum(idx.p), size = 1, prob = 0.4)
 
-  #The observed outcome Y was defined as Y = Z * Y(1) + (1 − Z) * Y(0).
+  # The observed outcome Y was defined as Y = Z * Y(1) + (1 − Z) * Y(0).
   Y.observed <- exposure * Y1 + (1 - exposure) * Y0
   true.weights <- ComputePropensityWeights(exposure, true.p.scores)
   true.weights[is.na(true.weights)] <- 9999
@@ -124,10 +123,9 @@ GenerateData <- function(n.obs, n.covariates, n.npositivity) {
   # Note that it is impossible to estimate E(Y(1)) for subjects with e(x) = 0
   # and so they should be removed from the study. Similarly, subjects with e(x)
   # = 1 should also be removed.
-  true.sdsn <- CreateSurveyDesign(
-    weights = true.weights,
-    data = simulated.data,
-    subset.rule = true.p.scores > 0 & true.p.scores < 1)
+  true.sdsn <- subset(svydesign(id = ~ 1, weights = ~ true.weights,
+                                data = simulated.data),
+                      true.p.scores > 0 & true.p.scores < 1)
   true.sglm <- svyglm(outcome.formula, design = true.sdsn,
                       family = quasibinomial())
   true.effect <- coef(true.sglm)[2]
@@ -273,6 +271,16 @@ for (s in 1:N.SIMULATIONS) {
     }
 
     if (isTRUE(is.runIPW)) {
+      PropensityViaIPW <- function(weights, bounds) {
+        rule <- (weights != 9999 & weights >= bounds[1] & weights <= bounds[2])
+        dsn.glm <- subset(svydesign(id = ~ 1, weights = ~ weights, data = data),
+                          rule)
+        sglm.glm <- svyglm(outcome.formula, design = dsn.glm,
+                           family = quasibinomial())
+        bias.estimate <- coef(sglm.glm)[2]- effect
+        return(bias.estimate)
+      }
+
       # Propensity scores are estimated using logistic regression. The
       # estimation model uses the IPW method to estimate causal effects.
       data$glm.p.scores <- glm(exposure.formula, data = data)$fitted
@@ -280,26 +288,10 @@ for (s in 1:N.SIMULATIONS) {
                                                    data$glm.p.scores)
       data$glm.weights[is.na(data$glm.weights) | data$glm.weights < 0] <- 9999
 
-      PropensityViaIPWglm <- function(low.cut, high.cut) {
-        dsn.glm <- CreateSurveyDesign(
-          weights = data$glm.weights, data = data,
-          subset.rule = (data$glm.weights != 9999 &
-                           data$glm.weights >= low.cut &
-                           data$glm.weights <= high.cut))
-        sglm.glm <- svyglm(outcome.formula, design = dsn.glm,
-                           family = quasibinomial())
-        bias.estimate <- coef(sglm.glm)[2]- effect
-        return(bias.estimate)
-      }
-
-      bias[[s]][b, "IPW.glm"] <-
-        PropensityViaIPWglm(low.cut = -99, high.cut = 99)
-      bias[[s]][b, "IPW.glm_0.025"] <-
-        PropensityViaIPWglm(low.cut = 0.025, high.cut = 0.975)
-      bias[[s]][b, "IPW.glm_0.05"] <-
-        PropensityViaIPWglm(low.cut = 0.05, high.cut = 0.95)
-      bias[[s]][b, "IPW.glm_0.1"] <-
-        PropensityViaIPWglm(low.cut = 0.1, high.cut = 0.9)
+      bias[[s]][b, "IPW.glm"] <- PropensityViaIPW(data$glm.weights, c(-99, 99))
+      bias[[s]][b, "IPW.glm_0.025"] <- PropensityViaIPW(data$glm.weights, c(0.025, 0.975))
+      bias[[s]][b, "IPW.glm_0.05"] <- PropensityViaIPW(data$glm.weights, c(0.05, 0.95))
+      bias[[s]][b, "IPW.glm_0.1"] <- PropensityViaIPW(data$glm.weights, c(0.1, 0.9))
 
       # Propensity scores are estimated using generalized boosted regression.
       # The estimaton model uses the IPW method to estimate causal effects.
@@ -312,26 +304,10 @@ for (s in 1:N.SIMULATIONS) {
                                                    data$gbm.p.scores)
       data$gbm.weights[is.na(data$gbm.weights) | data$gbm.weights < 0] <- 9999
 
-      PropensityViaIPWgbm <- function(low.cut, high.cut) {
-        dsn.gbm <- CreateSurveyDesign(
-          weights = data$gbm.weights, data = data,
-          subset.rule = (data$gbm.weights != 9999 &
-                           data$gbm.weights >= low.cut &
-                           data$gbm.weights <= high.cut))
-        sglm.gbm <- svyglm(outcome.formula, design = dsn.gbm,
-                           family = quasibinomial())
-        bias.estimate <- coef(sglm.gbm)[2]- effect
-        return(bias.estimate)
-      }
-
-      bias[[s]][b, "IPW.gbm"] <-
-        PropensityViaIPWgbm(low.cut = -99, high.cut = 99)
-      bias[[s]][b, "IPW.gbm_0.025"] <-
-        PropensityViaIPWgbm(low.cut = 0.025, high.cut = 0.975)
-      bias[[s]][b, "IPW.gbm_0.05"] <-
-        PropensityViaIPWgbm(low.cut = 0.05, high.cut = 0.95)
-      bias[[s]][b, "IPW.gbm_0.1"] <-
-        PropensityViaIPWgbm(low.cut = 0.1, high.cut = 0.9)
+      bias[[s]][b, "IPW.gbm"] <- PropensityViaIPW(data$gbm.weights, c(-99, 99))
+      bias[[s]][b, "IPW.gbm_0.025"] <- PropensityViaIPW(data$gbm.weights, c(0.025, 0.975))
+      bias[[s]][b, "IPW.gbm_0.05"] <- PropensityViaIPW(data$gbm.weights, c(0.05, 0.95))
+      bias[[s]][b, "IPW.gbm_0.1"] <- PropensityViaIPW(data$gbm.weights, c(0.1, 0.9))
 
       # Propensity scores are estimated using random forest. The estimaton model
       # uses the IPW method to estimate causal effects.
@@ -347,26 +323,10 @@ for (s in 1:N.SIMULATIONS) {
                                                   data$rf.p.scores)
       data$rf.weights[is.na(data$rf.weights) | data$rf.weights < 0] <- 9999
 
-      PropensityViaIPWrf <- function(low.cut, high.cut) {
-        dsn.rf <- CreateSurveyDesign(
-          weights = data$rf.weights, data = data,
-          subset.rule = (data$rf.weights != 9999 &
-                           data$rf.weights >= low.cut &
-                           data$rf.weights <= high.cut))
-        sglm.rf <- svyglm(outcome.formula, design = dsn.rf,
-                          family = quasibinomial())
-        bias.estimate <- coef(sglm.rf)[2]- effect
-        return(bias.estimate)
-      }
-
-      bias[[s]][b, "IPW.rf"] <-
-        PropensityViaIPWrf(low.cut = -99, high.cut = 99)
-      bias[[s]][b, "IPW.rf_0.025"] <-
-        PropensityViaIPWrf(low.cut = 0.025, high.cut = 0.975)
-      bias[[s]][b, "IPW.rf_0.05"] <-
-        PropensityViaIPWrf(low.cut = 0.05, high.cut = 0.95)
-      bias[[s]][b, "IPW.rf_0.1"] <-
-        PropensityViaIPWrf(low.cut = 0.1, high.cut = 0.9)
+      bias[[s]][b, "IPW.rf"] <- PropensityViaIPW(data$rf.weights, c(-99, 99))
+      bias[[s]][b, "IPW.rf_0.025"] <- PropensityViaIPW(data$rf.weights, c(0.025, 0.975))
+      bias[[s]][b, "IPW.rf_0.05"] <- PropensityViaIPW(data$rf.weights, c(0.05, 0.95))
+      bias[[s]][b, "IPW.rf_0.1"] <- PropensityViaIPW(data$rf.weights, c(0.1, 0.9))
     }
   }
 }
